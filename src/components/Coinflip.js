@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect } from "react";
 import { parseEther, formatEther } from "viem";
+import { useWatchContractEvent } from "wagmi";
 import "./Coinflip.css";
 
 const COINFLIP_ADDRESS = "0xcb300ef13a41E27a29674278b4C4D68A506aFf8D";
@@ -43,6 +44,40 @@ const Coinflip = ({ client, address }) => {
   const [isFlipping, setIsFlipping] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [contractBalance, setContractBalance] = useState("0");
+  const [pendingTx, setPendingTx] = useState(null);
+
+  // Watch for FlipResult events from the contract
+  useWatchContractEvent({
+    address: COINFLIP_ADDRESS,
+    abi: COINFLIP_ABI,
+    eventName: 'FlipResult',
+    onLogs: (logs) => {
+      console.log('FlipResult event received:', logs);
+      
+      // Find the log for our address
+      const userLog = logs.find(log => 
+        log.args.player && 
+        log.args.player.toLowerCase() === address?.toLowerCase()
+      );
+      
+      if (userLog) {
+        const { choice: eventChoice, result, amount: eventAmount, won } = userLog.args;
+        
+        const resultData = {
+          choice: eventChoice ? "Heads" : "Tails",
+          result: result ? "Heads" : "Tails", 
+          won: won,
+          amount: formatEther(eventAmount)
+        };
+        
+        console.log('Processing result for user:', resultData);
+        setLastResult(resultData);
+        setIsFlipping(false);
+        setPendingTx(null);
+        fetchContractBalance();
+      }
+    },
+  });
 
   useEffect(() => {
     if (client) {
@@ -85,31 +120,15 @@ const Coinflip = ({ client, address }) => {
       });
 
       console.log("Transaction sent:", tx);
+      setPendingTx(tx);
 
-      // Simulate the coinflip result based on contract logic
-      // The contract uses block.timestamp for randomness
-      const simulatedResult = Math.random() < 0.5; // 50/50 chance
-      const won = simulatedResult === choice;
-
-      const result = {
-        choice: choice ? "Heads" : "Tails",
-        result: simulatedResult ? "Heads" : "Tails",
-        won: won,
-        amount: amount
-      };
-
-      console.log("Simulated result:", result);
-      
-      // Show result after a short delay to simulate processing
-      setTimeout(() => {
-        setLastResult(result);
-        setIsFlipping(false);
-        fetchContractBalance();
-      }, 2000);
+      // The result will be handled by the event listener
+      // No need to simulate - wait for the actual contract event
 
     } catch (error) {
       console.error("Error flipping coin:", error);
       setIsFlipping(false);
+      setPendingTx(null);
     }
   };
 
@@ -163,6 +182,15 @@ const Coinflip = ({ client, address }) => {
         >
           {isFlipping ? " FLIPPING..." : " FLIP COIN"}
         </button>
+
+        {isFlipping && pendingTx && (
+          <div className="result pending">
+            <div className="processing"></div>
+            <h3>Transaction Pending...</h3>
+            <p>Waiting for contract event...</p>
+            <p>Tx: {pendingTx.slice(0, 10)}...</p>
+          </div>
+        )}
 
         {lastResult && (
           <div className={`result ${lastResult.won === true ? "win" : lastResult.won === false ? "lose" : "pending"}`}>
